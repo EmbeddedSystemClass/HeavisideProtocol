@@ -2,11 +2,10 @@
   * @author     Onur Efe
   */
 
-#ifndef GENERIC_H
-#define GENERIC_H
+#ifndef __GENERIC_H
+#define __GENERIC_H
 
 #include <stdint.h>
-#include "assert.h"
 
 #define MAX_INT8 0x7f
 #define MIN_INT8 (-MAX_INT8 - 1)

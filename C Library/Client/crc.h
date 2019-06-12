@@ -1,5 +1,5 @@
-#ifndef CRC_H
-#define CRC_H
+#ifndef __CRC_H
+#define __CRC_H
 
 #ifdef __cplusplus
 extern "C"

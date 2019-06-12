@@ -5,8 +5,6 @@
 // CCIT CRC16 calculation.
 uint16_t CRC_Calculate16(uint16_t seed, uint8_t *buff, uint16_t size)
 {
-	assert_param(buff != 0);
-
 	uint8_t x;
 	uint16_t crc = seed;
 
@@ -14,7 +12,7 @@ uint16_t CRC_Calculate16(uint16_t seed, uint8_t *buff, uint16_t size)
 	{
 		x = crc >> 8 ^ *buff++;
 		x ^= x >> 4;
-		crc = (uint16_t)(crc << 8) ^ ((uint16_t)(x << 12)) ^ ((uint16_t)(x << 5)) ^ ((uint16_t)x);
+		crc = (crc << 8) ^ ((uint16_t)(x << 12)) ^ ((uint16_t)(x << 5)) ^ ((uint16_t)x);
 	}
 	return crc;
 }

@@ -1,11 +1,10 @@
 #include "characteristic_protocol.h"
 #include "characteristic_server.h"
-#include "sys_time.h"
 
 /* Private typedefs ----------------------------------------------------------*/
 /* Private function declarations ---------------------------------------------*/
-static void pduReceivedEventHandler(CharacteristicProtocol_PduType_t pduType,
-									uint8_t charId, uint16_t unparsedPduSize);
+static void pduReceivedEventHandler(uint8_t sourceAddress, CharacteristicProtocol_PduType_t pduType,
+						uint8_t charId, uint16_t unparsedPduSize);
 
 static CharacteristicServer_Characteristic_t *getChar(uint8_t charId);
 static uint8_t getCharIdx(uint8_t charId);
@@ -13,31 +12,19 @@ static uint8_t getCharIdx(uint8_t charId);
 /* Private variables ---------------------------------------------------------*/
 // Variables to store module control data.
 static CharacteristicServer_State_t State = CHARACTERISTIC_SERVER_STATE_UNINIT;
-static Bool_t IsConnected;
-static uint32_t LastRequestTimestamp;
-
-// Device Id. Used when device represent itself.
-static uint8_t *DeviceId;
-static uint8_t DeviceIdLength;
 
 // Characteristic table related data.
 static CharacteristicServer_Characteristic_t
 	CharacteristicTable[CHARACTERISTIC_SERVER_MAX_NUMBER_OF_CHARS];
 
 static uint8_t NumOfChars;
-
 static CharacteristicServer_EventOccurredDelegate_t EventOccurredDelegate;
 
 /* Public function implementations. ------------------------------------------*/
-void CharacteristicServer_Setup(CharacteristicServer_EventOccurredDelegate_t eventHandler,
-								uint8_t *deviceId, uint8_t deviceIdLength)
+void CharacteristicServer_Setup(uint8_t homeAddress,
+		CharacteristicServer_EventOccurredDelegate_t eventHandler)
 {
-	assert_param(State == CHARACTERISTIC_SERVER_STATE_UNINIT);
-
-	CharacteristicProtocol_Setup(&pduReceivedEventHandler);
-
-	DeviceId = deviceId;
-	DeviceIdLength = deviceIdLength;
+	CharacteristicProtocol_Setup(homeAddress, &pduReceivedEventHandler);
 
 	// Set delegates.
 	EventOccurredDelegate = eventHandler;
@@ -51,9 +38,6 @@ void CharacteristicServer_Setup(CharacteristicServer_EventOccurredDelegate_t eve
 
 void CharacteristicServer_Register(uint8_t charId, void *obj, uint16_t objSize, uint8_t properties)
 {
-	assert_param((State != CHARACTERISTIC_SERVER_STATE_UNINIT) &&
-				 !pObj && !objSize && (NumOfChars < MAX_NUMBER_OF_CHARACTERISTICS));
-
 	CharacteristicTable[NumOfChars].charId = charId;
 	CharacteristicTable[NumOfChars].data = (uint8_t *)obj;
 	CharacteristicTable[NumOfChars].length = objSize;
@@ -62,8 +46,6 @@ void CharacteristicServer_Register(uint8_t charId, void *obj, uint16_t objSize, 
 
 void CharacteristicServer_DeRegister(uint8_t charId)
 {
-	assert_param(State != CHARACTERISTIC_SERVER_STATE_UNINIT);
-
 	uint8_t char_idx = getCharIdx(charId);
 
 	if (char_idx == 0xFF)
@@ -78,15 +60,10 @@ void CharacteristicServer_DeRegister(uint8_t charId)
 	}
 }
 
-void CharacteristicServer_Start(uint8_t channelId)
+void CharacteristicServer_Start(void)
 {
-	assert_param(State == CHARACTERISTIC_SERVER_STATE_READY);
-
 	// Start characteristic protocol.
-	CharacteristicProtocol_Start(channelId);
-
-	// Set not connected.
-	IsConnected = FALSE;
+	CharacteristicProtocol_Start();
 
 	// Set state to operating.
 	State = CHARACTERISTIC_SERVER_STATE_OPERATING;
@@ -94,26 +71,17 @@ void CharacteristicServer_Start(uint8_t channelId)
 
 void CharacteristicServer_Execute(void)
 {
-	assert_param(State == CHARACTERISTIC_SERVER_STATE_OPERATING);
+	if (State != CHARACTERISTIC_SERVER_STATE_OPERATING)
+	{
+		return;
+	}
 
 	// Call submodule's executer.
 	CharacteristicProtocol_Execute();
-
-	// Check if connection dropout time has been passed.
-	if (IsConnected && ((SysTime_GetTimeInMs() - LastRequestTimestamp) >
-						CHARACTERISTIC_SERVER_CONNECTION_DROPOUT_PERIOD_IN_MS))
-	{
-		IsConnected = FALSE;
-
-		// Call event occurred delegate.
-		EventOccurredDelegate ? EventOccurredDelegate(CHARACTERISTIC_SERVER_DISCONNECTION_EVENT, 0) : (void)0;
-	}
 }
 
 void CharacteristicServer_Stop(void)
 {
-	assert_param(State == CHARACTERISTIC_SERVER_STATE_OPERATING);
-
 	// Stop characteristic protocol.
 	CharacteristicProtocol_Stop();
 
@@ -121,20 +89,14 @@ void CharacteristicServer_Stop(void)
 	State = CHARACTERISTIC_SERVER_STATE_READY;
 }
 
-uint8_t CharacteristicServer_MapAvailableChannels(void)
-{
-	return CharacteristicProtocol_MapAvailableChannels();
-}
-
 CharacteristicServer_Characteristic_t *CharacteristicServer_ParseCharacteristic(uint8_t charId)
 {
-	assert_param(State != CHARACTERISTIC_SERVER_STATE_UNINIT);
-
 	return &CharacteristicTable[getCharIdx(charId)];
 }
 
 /* Private function implementations ------------------------------------------*/
-static void pduReceivedEventHandler(CharacteristicProtocol_PduType_t pduType,
+static void pduReceivedEventHandler(uint8_t sourceAddress, 
+									CharacteristicProtocol_PduType_t pduType,
 									uint8_t charId, uint16_t unparsedPduSize)
 {
 	// If not connected and operating send response. Discard the PDU otherwise.
@@ -143,57 +105,8 @@ static void pduReceivedEventHandler(CharacteristicProtocol_PduType_t pduType,
 		return;
 	}
 
-	// Update last request timestamp.
-	LastRequestTimestamp = SysTime_GetTimeInMs();
-
 	switch (pduType)
 	{
-	case CHARACTERISTIC_PROTOCOL_PDUTYPE_CHECK_REQ:
-	{
-		if (!IsConnected)
-		{
-			CharacteristicProtocol_Send(CHARACTERISTIC_PROTOCOL_PDUTYPE_CHECK_RESP, 0,
-										DeviceId, DeviceIdLength);
-		}
-	}
-	break;
-
-	case CHARACTERISTIC_PROTOCOL_PDUTYPE_CONNECTION_REQ:
-	{
-		if (!IsConnected)
-		{
-			EventOccurredDelegate ? EventOccurredDelegate(CHARACTERISTIC_SERVER_CONNECTION_EVENT, 0) : (void)0;
-
-			IsConnected = TRUE;
-		}
-
-		CharacteristicProtocol_Send(CHARACTERISTIC_PROTOCOL_PDUTYPE_CONNECTION_RESP,
-									OPERATION_RESULT_SUCCESS, 0, 0);
-	}
-	break;
-
-	case CHARACTERISTIC_PROTOCOL_PDUTYPE_DISCONNECTION_REQ:
-	{
-		if (IsConnected)
-		{
-			EventOccurredDelegate ? EventOccurredDelegate(CHARACTERISTIC_SERVER_DISCONNECTION_EVENT, 0) : (void)0;
-
-			IsConnected = FALSE;
-		}
-
-		CharacteristicProtocol_Send(CHARACTERISTIC_PROTOCOL_PDUTYPE_DISCONNECTION_RESP, 0, 0, 0);
-	}
-	break;
-
-	case CHARACTERISTIC_PROTOCOL_PDUTYPE_POLL_REQ:
-	{
-		if (IsConnected)
-		{
-			CharacteristicProtocol_Send(CHARACTERISTIC_PROTOCOL_PDUTYPE_POLL_RESP, 0, 0, 0);
-		}
-	}
-	break;
-
 	case CHARACTERISTIC_PROTOCOL_PDUTYPE_READ_REQ:
 	{
 		CharacteristicServer_Characteristic_t *characteristic = getChar(charId);
@@ -201,14 +114,16 @@ static void pduReceivedEventHandler(CharacteristicProtocol_PduType_t pduType,
 		// If the characteristic is readable; read and send it.
 		if (characteristic && (characteristic->properties & CHARACTERISTIC_SERVER_CHAR_PROPERTY_READ))
 		{
-			CharacteristicProtocol_Send(CHARACTERISTIC_PROTOCOL_PDUTYPE_READ_RESP,
+			EventOccurredDelegate ? EventOccurredDelegate(CHARACTERISTIC_SERVER_READ_CHAR_EVENT, 
+				charId) : (void)0;
+
+			CharacteristicProtocol_Send(sourceAddress, CHARACTERISTIC_PROTOCOL_PDUTYPE_READ_RESP,
 										OPERATION_RESULT_SUCCESS,
 										characteristic->data, characteristic->length);
-			EventOccurredDelegate ? EventOccurredDelegate(CHARACTERISTIC_SERVER_READ_CHAR_EVENT, charId) : (void)0;
 		}
 		else
 		{
-			CharacteristicProtocol_Send(CHARACTERISTIC_PROTOCOL_PDUTYPE_READ_RESP,
+			CharacteristicProtocol_Send(sourceAddress, CHARACTERISTIC_PROTOCOL_PDUTYPE_READ_RESP,
 										OPERATION_RESULT_FAILURE, 0, 0);
 		}
 	}
@@ -222,18 +137,20 @@ static void pduReceivedEventHandler(CharacteristicProtocol_PduType_t pduType,
 		if (characteristic && (characteristic->properties & CHARACTERISTIC_SERVER_CHAR_PROPERTY_WRITE))
 		{
 			// Parse pdu data.
-			CharacteristicProtocol_ParsePduData(characteristic->data, characteristic->length, unparsedPduSize);
+			CharacteristicProtocol_ParsePduData(characteristic->data, characteristic->length, 
+				unparsedPduSize);
 
-			EventOccurredDelegate ? EventOccurredDelegate(CHARACTERISTIC_SERVER_WRITE_CHAR_EVENT, charId) : (void)0;
+			EventOccurredDelegate ? EventOccurredDelegate(CHARACTERISTIC_SERVER_WRITE_CHAR_EVENT, 
+				charId) : (void)0;
 		
 			// Send succeeded response.
-			CharacteristicProtocol_Send(CHARACTERISTIC_PROTOCOL_PDUTYPE_WRITE_RESP,
+			CharacteristicProtocol_Send(sourceAddress, CHARACTERISTIC_PROTOCOL_PDUTYPE_WRITE_RESP,
 										OPERATION_RESULT_SUCCESS, 0, 0);
 		}
 		else
 		{
 			// Send failure response.
-			CharacteristicProtocol_Send(CHARACTERISTIC_PROTOCOL_PDUTYPE_WRITE_RESP,
+			CharacteristicProtocol_Send(sourceAddress, CHARACTERISTIC_PROTOCOL_PDUTYPE_WRITE_RESP,
 										OPERATION_RESULT_FAILURE, 0, 0);
 		}
 	}

@@ -4,13 +4,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "serial.h"
 #include "crc.h"
-#include "utils.h"
 #include "packet_manager.h"
-#include "debug.h"
-
-/* TODO: CRC terminated packets would be useful. This byte stuffing leads to 
-variable length data and can't be handled without buffer.
-*/
 
 /* Private definitions -------------------------------------------------------*/
 #define RECEIVE_BUFFER_SIZE (1 << PACKET_MANAGER_RECEIVE_QUEUE_CAPACITY)
@@ -36,6 +30,7 @@ typedef uint8_t SpecialCharacterEscapeCode_t;
 /* Private function prototypes -----------------------------------------------*/
 static void dequeueAndDecode(Queue_Buffer_t *buff, uint8_t *data, uint16_t *dataLength, uint16_t rawLength);
 static void encodeAndEnqueue(Queue_Buffer_t *buff, uint8_t *data, uint16_t dataLength);
+static void memoryCopy(uint8_t *source, uint8_t *destination, uint32_t length);
 static void serialEventHandler(Serial_Event_t event);
 
 /* Private variables ---------------------------------------------------------*/
@@ -63,8 +58,6 @@ static Bool_t DataReceivedFlag;
   */
 void PacketManager_Setup(PacketManager_EventOccurredDelegate_t eventHandler)
 {
-	assert_param(State == PACKET_MANAGER_STATE_UNINIT);
-
 	// Initialize buffers.
 	Queue_InitBuffer(&ReceiveBuffer, ReceiveBufferContainer,
 					 PACKET_MANAGER_RECEIVE_QUEUE_CAPACITY);
@@ -79,35 +72,13 @@ void PacketManager_Setup(PacketManager_EventOccurredDelegate_t eventHandler)
 	State = PACKET_MANAGER_STATE_READY;
 }
 
-uint8_t PacketManager_MapAvailableChannels(void)
-{
-	return ((uint8_t)Serial_MapAvailableChannels());
-}
-
-void PacketManager_ChangeChannel(uint8_t channelId)
-{
-    // Clear buffers.
-	Queue_ClearBuffer(&ReceiveBuffer);
-	Queue_ClearBuffer(&TransmitBuffer);
-
-    TempStartIndex = 0;
-
-	// Clear flags.
-	ErrorOccurredFlag = FALSE;
-	DataReceivedFlag = FALSE;
-
-	Serial_ChangeChannel(channelId);
-}
-
 /***
   * @Brief      Sets start event.
   */
-Bool_t PacketManager_Start(uint8_t channelId)
+Bool_t PacketManager_Start(void)
 {
-	assert_param(State == PACKET_MANAGER_STATE_READY);
-
 	// Start serial.
-	if (!Serial_Start(channelId))
+	if (!Serial_Start())
 	{
 		return FALSE;
 	}
@@ -145,7 +116,8 @@ void PacketManager_Execute(void)
 		State = PACKET_MANAGER_STATE_ERROR;
 		Serial_Stop();
 
-		EventOccurredDelegate ? EventOccurredDelegate(PACKET_MANAGER_ERROR_OCCURRED_EVENT, 0) : (void)0;
+		EventOccurredDelegate ? EventOccurredDelegate(PACKET_MANAGER_ERROR_OCCURRED_EVENT, 
+			0) : (void)0;
 	}
 	else if (DataReceivedFlag)
 	{
@@ -153,14 +125,11 @@ void PacketManager_Execute(void)
 		uint16_t length;
 		uint8_t buff[16];
 
-		while (Serial_NumOfElements())
-		{
-			// Read buffer.
-			Serial_ReadBuffer(buff, sizeof(buff), &length);
+		// Read buffer.
+		Serial_ReadBuffer(buff, sizeof(buff), &length);
 
-			// Enqueue elements to queue.
-			Queue_EnqueueArr(&ReceiveBuffer, buff, length);
-		}
+		// Enqueue elements to queue.
+		Queue_EnqueueArr(&ReceiveBuffer, buff, length);
 	}
 	// Check if delimiter received.
 	else
@@ -233,8 +202,6 @@ void PacketManager_Execute(void)
 
 void PacketManager_Stop(void)
 {
-	assert_param(State == PACKET_MANAGER_STATE_OPERATING);
-
 	Serial_Stop();
 
 	State = PACKET_MANAGER_STATE_READY;
@@ -242,9 +209,6 @@ void PacketManager_Stop(void)
 
 void PacketManager_Send(PacketManager_PduField_t *pduFields, uint8_t pduFieldCount)
 {
-	assert_param((State == PACKET_MANAGER_STATE_OPERATING) &&
-				 !pPduField && !pduFieldCount);
-
 	if (ErrorOccurredFlag)
 	{
 		return;
@@ -269,27 +233,17 @@ void PacketManager_Send(PacketManager_PduField_t *pduFields, uint8_t pduFieldCou
 
 uint16_t PacketManager_ParseField(uint8_t *data, uint16_t length, uint16_t unparsedPduSize)
 {
-	assert_param((State == PACKET_MANAGER_STATE_OPERATING) && !pPduField);
-
 	uint16_t parse_length = (unparsedPduSize < length) ? unparsedPduSize : length;
 
-	Utils_MemoryCopy(&Temp[TempStartIndex], data, parse_length);
+	memoryCopy(&Temp[TempStartIndex], data, parse_length);
 
 	TempStartIndex += parse_length;
 
 	return (unparsedPduSize - parse_length);
 }
 
-/***
-  * @Brief      Handles module errors. Recovers corruption free messages and clears the
-  *             hardware errors.
-  */
 void PacketManager_ErrorHandler(void)
 {
-	assert_param(State == PACKET_MANAGER_STATE_ERROR);
-
-	Serial_ErrorHandler();
-
 	// Set state to ready.
 	State = PACKET_MANAGER_STATE_READY;
 }
@@ -383,6 +337,17 @@ static void encodeAndEnqueue(Queue_Buffer_t *buff, uint8_t *data, uint16_t dataL
 		default:
 			Queue_Enqueue(buff, element);
 			break;
+		}
+	}
+}
+
+void memoryCopy(uint8_t *source, uint8_t *destination, uint32_t length)
+{
+	if (source && destination)
+	{
+		for (uint32_t i = 0; i < length; i++)
+		{
+			destination[i] = source[i];
 		}
 	}
 }

@@ -2,8 +2,8 @@
   * @author     Onur Efe
   */
 
-#ifndef PACKET_MANAGER_H
-#define PACKET_MANAGER_H
+#ifndef __PACKET_MANAGER_H
+#define __PACKET_MANAGER_H
 
 /* Include files -------------------------------------------------------------*/
 #include "generic.h"
@@ -14,8 +14,8 @@ extern "C"
 {
 #endif
 	/* Exported definitions -----------------------------------------------------*/
-#define PACKET_MANAGER_RECEIVE_QUEUE_CAPACITY QUEUE_CAPACITY_512
-#define PACKET_MANAGER_TRANSMIT_QUEUE_CAPACITY QUEUE_CAPACITY_512
+#define PACKET_MANAGER_RECEIVE_QUEUE_CAPACITY QUEUE_CAPACITY_128
+#define PACKET_MANAGER_TRANSMIT_QUEUE_CAPACITY QUEUE_CAPACITY_128
 
 	/* Exported types ------------------------------------------------------------*/
 	enum
@@ -51,21 +51,9 @@ extern "C"
 	extern void PacketManager_Setup(PacketManager_EventOccurredDelegate_t eventHandler);
 
 	/***
- * @Brief       Maps channels and returns channel count.
- *              This is required for scan process.
- */
-	extern uint8_t PacketManager_MapAvailableChannels(void);
-
-	/***
- * @Brief			Changes current channel.
- *
- */
-	extern void PacketManager_ChangeChannel(uint8_t channelId);
-
-	/***
   * @Brief      Start packet manager.
   */
-	extern Bool_t PacketManager_Start(uint8_t channelId);
+	extern Bool_t PacketManager_Start(void);
 
 	/***
   * @Brief      Module executer function.

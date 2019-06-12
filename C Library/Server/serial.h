@@ -1,8 +1,7 @@
-#ifndef SERIAL_H
-#define SERIAL_H
+#ifndef __SERIAL_H
+#define __SERIAL_H
 
 #include "generic.h"
-#include "Arduino.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -29,15 +28,13 @@ extern "C"
 	typedef void (*Serial_EventOccurredDelegate_t)(Serial_Event_t event);
 
 	/* Exported functions ------------------------------------------------------*/
-	extern int32_t Serial_MapAvailableChannels(void);
 	extern void Serial_Setup(Serial_EventOccurredDelegate_t eventHandler);
-	extern Bool_t Serial_Start(int32_t channel);
-	extern Bool_t Serial_ChangeChannel(int32_t channel);
+	extern Bool_t Serial_Start(void);
 	extern void Serial_Execute(void);
 	extern void Serial_Stop(void);
 	extern uint16_t Serial_GetAvailableSpace(void);
-	extern void Serial_ReadBuffer(uint8_t *pData, uint16_t maxLength, uint16_t *pLength);
-	extern void Serial_Send(uint8_t *pData, uint16_t dataLength);
+	extern void Serial_ReadBuffer(uint8_t *data, uint16_t maxLength, uint16_t *length);
+	extern void Serial_Send(uint8_t *data, uint16_t dataLength);
 
 #ifdef __cplusplus
 }

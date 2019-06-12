@@ -7,7 +7,6 @@ extern "C" {
 
 #include "generic.h"
 
-extern void SysTime_Start(void);
 extern uint32_t SysTime_GetTimeInMs(void);
 
 #ifdef __cplusplus
