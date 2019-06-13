@@ -31,8 +31,8 @@ extern "C"
 /* Includes ------------------------------------------------------------------*/
 #include "generic.h"
 
-  /* Exported macros ---------------------------------------------------------*/
-  #define QUEUE_CONTAINER_SIZE(c) (1 << (c))
+/* Exported macros ---------------------------------------------------------*/
+#define QUEUE_CONTAINER_SIZE(c) (1 << (c))
 
   /* Typedefs ------------------------------------------------------------------*/
   typedef struct
@@ -97,7 +97,7 @@ extern "C"
   extern void Queue_DequeueArr(Queue_Buffer_t *buff, uint8_t *data, uint16_t dataLength);
 
   /***
-  * @Brief      Removes elements until the indexed element(also including).
+  * @Brief      Removes elements until the indexed element(not including).
   *
   * @Params     buff-> Pointer to the buffer.
   *             		elementIndex-> Index of the element.
@@ -108,24 +108,44 @@ extern "C"
 
   /***
   * @Brief      Searches an element in the buffer. Returns element index if the element
-  *             exists. Returns -1 otherwise.
+  *             exists. Returns 0xFFFF otherwise.
   *
   * @Params     buff-> Buffer to be searched.
   *             	element-> Element value.
   *
-  * @Return     Element index or -1.
+  * @Return     Element index or 0xFFFF.
   */
   extern uint16_t Queue_Search(Queue_Buffer_t *buff, uint8_t element);
 
   /***
   * @Brief      Peeks element in the buffer. Indexing starts at the first element.
   *                       
-  * @Params     pBuff-> Pointer to the buffer.
+  * @Params     buff-> Pointer to the buffer.
   *             		elementIndex-> Index of the element.
   *
   * @Return     Element value.
   */
   extern uint8_t Queue_Peek(Queue_Buffer_t *buff, uint16_t elementIndex);
+
+  /***
+  * @Brief      Sets element in the buffer. Indexing starts at the first element.
+  *                       
+  * @Params     buff-> Pointer to the buffer.
+  *             elementIndex-> Index of the element.
+  *             value-> Value of the element to be set.
+  *  
+  * @Return     None.
+  */
+  extern void Queue_Set(Queue_Buffer_t *buff, uint16_t elementIndex, uint8_t value);
+
+  /***
+  * @Brief      Gets index of next write take place. 
+  *                       
+  * @Params      buff-> Pointer to the buffer.
+  *  
+  * @Return     Index.
+  */
+  extern uint16_t Queue_GetCurrentIdx(Queue_Buffer_t *buff);
 
   /***
   * @Brief      Returns number of elements the buffer contains.

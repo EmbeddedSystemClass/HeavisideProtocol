@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include "characteristic_client.h"
+#include "objshare_client.h"
 
 #define HOME_ADDRESS 0x00
 #define SERVER_ADDRESS 0x01
@@ -36,25 +36,25 @@ void setup()
 {
   delay(1000);
 
-  CharacteristicClient_Delegates_t delegates;
+  ObjshareClient_Delegates_t delegates;
 
   delegates.noResponseDelegate = noResponse;
   delegates.operationFailedDelegate = operationFailed;
   delegates.readResponseReceivedDelegate = readResponseReceived;
   delegates.idleStateDelegate = idleEventHandler;
 
-  CharacteristicClient_Setup(HOME_ADDRESS, &delegates);
+  ObjshareClient_Setup(HOME_ADDRESS, &delegates);
 
   Serial.begin(9600);
 
-  CharacteristicClient_Start();
+  ObjshareClient_Start();
 }
 
 void loop()
 {
   static int test_cnt = 0;
 
-  CharacteristicClient_Execute();
+  ObjshareClient_Execute();
 
   // Enqueue write requests.
   if (isIdle)
@@ -73,14 +73,14 @@ void loop()
 
       for (uint8_t i = 0; i < sizeof(char_ids) / sizeof(char_ids[0]); i++)
       {
-        CharacteristicClient_SendWriteRequest(SERVER_ADDRESS,
+        ObjshareClient_SendWriteRequest(SERVER_ADDRESS,
                                               i, char_write[i], char_sizes[i]);
       }
 
       // Enqueue read requests for written chars.
       for (uint8_t i = 0; i < sizeof(char_ids) / sizeof(char_ids[0]); i++)
       {
-        CharacteristicClient_SendReadRequest(SERVER_ADDRESS,
+        ObjshareClient_SendReadRequest(SERVER_ADDRESS,
                                              char_ids[i], char_read[i],
                                              char_sizes[i]);
       }

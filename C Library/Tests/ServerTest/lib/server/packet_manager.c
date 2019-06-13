@@ -3,12 +3,8 @@
   */
 /* Includes ------------------------------------------------------------------*/
 #include "serial.h"
-#include "crc.h"
 #include "packet_manager.h"
-
-/* Private definitions -------------------------------------------------------*/
-#define RECEIVE_BUFFER_SIZE (1 << PACKET_MANAGER_RECEIVE_QUEUE_CAPACITY)
-#define TRANSMIT_BUFFER_SIZE (1 << PACKET_MANAGER_TRANSMIT_QUEUE_CAPACITY)
+#include "crc.h"
 
 /* Private typedefs ----------------------------------------------------------*/
 enum
@@ -28,27 +24,26 @@ enum
 typedef uint8_t SpecialCharacterEscapeCode_t;
 
 /* Private function prototypes -----------------------------------------------*/
-static void dequeueAndDecode(Queue_Buffer_t *buff, uint8_t *data, uint16_t *dataLength, uint16_t rawLength);
-static void encodeAndEnqueue(Queue_Buffer_t *buff, uint8_t *data, uint16_t dataLength);
-static void memoryCopy(uint8_t *source, uint8_t *destination, uint32_t length);
-static void serialEventHandler(Serial_Event_t event);
+static uint8_t decode(uint8_t element);
+static void encodeToBuffer(uint8_t *src, uint8_t *dest, uint16_t srcLength, uint16_t *destLength);
+static void serialEventHandler(Serial_Event_t event, uint8_t *data, uint16_t length);
 
 /* Private variables ---------------------------------------------------------*/
 static PacketManager_EventOccurredDelegate_t EventOccurredDelegate;
 
 static uint8_t State = PACKET_MANAGER_STATE_UNINIT;
 
-static uint8_t ReceiveBufferContainer[RECEIVE_BUFFER_SIZE];
-static uint8_t TransmitBufferContainer[TRANSMIT_BUFFER_SIZE];
+static uint8_t Inbox[PACKET_MANAGER_MAX_PACKET_SIZE];
+static uint8_t InboxDataLength;
+static uint8_t InboxIdx;
+static uint8_t InboxParseIdx;
 
-static uint8_t Temp[RECEIVE_BUFFER_SIZE];
-static uint16_t TempStartIndex;
+static uint8_t Outbox[PACKET_MANAGER_MAX_PACKET_SIZE];
+static uint8_t OutboxDataLength;
+static uint8_t OutboxIdx;
 
-static Queue_Buffer_t ReceiveBuffer;
-static Queue_Buffer_t TransmitBuffer;
-
-static Bool_t ErrorOccurredFlag;
-static Bool_t DataReceivedFlag;
+static Bool_t PacketStartedFlag;
+static Bool_t EscapeMode;
 
 /* Exported functions --------------------------------------------------------*/
 /***
@@ -58,12 +53,6 @@ static Bool_t DataReceivedFlag;
   */
 void PacketManager_Setup(PacketManager_EventOccurredDelegate_t eventHandler)
 {
-	// Initialize buffers.
-	Queue_InitBuffer(&ReceiveBuffer, ReceiveBufferContainer,
-					 PACKET_MANAGER_RECEIVE_QUEUE_CAPACITY);
-	Queue_InitBuffer(&TransmitBuffer, TransmitBufferContainer,
-					 PACKET_MANAGER_TRANSMIT_QUEUE_CAPACITY);
-
 	EventOccurredDelegate = eventHandler;
 
 	// Register delegates.
@@ -84,12 +73,14 @@ Bool_t PacketManager_Start(void)
 	}
 
 	// Clear buffers.
-	Queue_ClearBuffer(&ReceiveBuffer);
-	Queue_ClearBuffer(&TransmitBuffer);
-
+	InboxDataLength = 0;
+	InboxIdx = 0;
+	OutboxIdx = 0;
+	OutboxDataLength = 0;
+	
 	// Clear flags.
-	ErrorOccurredFlag = FALSE;
-	DataReceivedFlag = FALSE;
+	EscapeMode = FALSE;
+	PacketStartedFlag = FALSE;
 
 	State = PACKET_MANAGER_STATE_OPERATING;
 
@@ -108,96 +99,6 @@ void PacketManager_Execute(void)
 
 	// Call serial execute.
 	Serial_Execute();
-
-	// If error occurred, set state to error and call delegate.
-	if (ErrorOccurredFlag)
-	{
-        ErrorOccurredFlag = FALSE;
-		State = PACKET_MANAGER_STATE_ERROR;
-		Serial_Stop();
-
-		EventOccurredDelegate ? EventOccurredDelegate(PACKET_MANAGER_ERROR_OCCURRED_EVENT, 
-			0) : (void)0;
-	}
-	else if (DataReceivedFlag)
-	{
-		DataReceivedFlag = FALSE;
-		uint16_t length;
-		uint8_t buff[16];
-
-		// Read buffer.
-		Serial_ReadBuffer(buff, sizeof(buff), &length);
-
-		// Enqueue elements to queue.
-		Queue_EnqueueArr(&ReceiveBuffer, buff, length);
-	}
-	// Check if delimiter received.
-	else
-	{
-		// Receive buffer related processes.
-		{
-			uint16_t start_index = Queue_Search(&ReceiveBuffer, START_CHARACTER);
-
-			// Check start element.
-			if (start_index != 0xFFFF)
-			{
-                // Remove till start index.
-				if (start_index != 0)
-				{
-					Queue_Remove(&ReceiveBuffer, start_index);
-				}
-
-                // Search for terminate character.
-				uint16_t terminate_index = Queue_Search(&ReceiveBuffer, TERMINATE_CHARACTER);
-
-				// May seem like long sequence of operations but they are only activated when packet has been received.
-				if (terminate_index != 0xFFFF)
-				{
-					uint16_t checksummed_pdu_size;
-
-					// Dequeue start character.
-					Queue_Dequeue(&ReceiveBuffer);
-
-                    dequeueAndDecode(&ReceiveBuffer, Temp, &checksummed_pdu_size, terminate_index - 1);
-
-					// Validate pdu.
-					if (!CRC_Calculate16(0xFFFF, Temp, checksummed_pdu_size))
-                    {
-                        TempStartIndex = 0;
-
-						// Call event occurred delegate.
-						EventOccurredDelegate ? EventOccurredDelegate(PACKET_MANAGER_PDU_RECEIVED_EVENT,
-																	  checksummed_pdu_size - sizeof(uint16_t))
-											  : (void)0;
-					}
-
-					// Dequeue terminate character.
-					Queue_Dequeue(&ReceiveBuffer);
-				}
-				else
-				{
-					Queue_Remove(&ReceiveBuffer, terminate_index + 1);
-				}
-			}
-		}
-	}
-
-	// Transmit buffer related processes.
-	{
-		// While the serial buffer is available and there are data to send,
-		// append them to serial port.
-        uint8_t buff[32];
-		uint16_t available_space = Serial_GetAvailableSpace();
-		uint16_t element_count = Queue_GetElementCount(&TransmitBuffer);
-		uint16_t bytes_to_write = (available_space < element_count) ? available_space : element_count;
-		bytes_to_write = (sizeof(buff) < bytes_to_write) ? sizeof(buff) : bytes_to_write;
-
-		if (bytes_to_write)
-		{
-            Queue_DequeueArr(&TransmitBuffer, buff, bytes_to_write);
-            Serial_Send(buff, bytes_to_write);
-		}
-	}
 }
 
 void PacketManager_Stop(void)
@@ -209,36 +110,55 @@ void PacketManager_Stop(void)
 
 void PacketManager_Send(PacketManager_PduField_t *pduFields, uint8_t pduFieldCount)
 {
-	if (ErrorOccurredFlag)
+	// Discard if not operating.
+	if (State != PACKET_MANAGER_STATE_OPERATING)
+	{
+		return;
+	}
+
+	// Check if there is any data waiting.
+	if ((OutboxDataLength != 0) && (OutboxDataLength != OutboxIdx))
 	{
 		return;
 	}
 
 	uint16_t crc_code = 0xFFFF;
-	Queue_Enqueue(&TransmitBuffer, START_CHARACTER);
+	uint8_t outbox_idx = 0;
+	uint16_t __dest_length;
+
+	Outbox[outbox_idx++] = START_CHARACTER;
 
 	// Encode and enqueue pdu fields..
 	for (uint8_t i = 0; i < pduFieldCount; i++)
 	{
-		encodeAndEnqueue(&TransmitBuffer, pduFields[i].data, pduFields[i].length);
+		encodeToBuffer(pduFields[i].data, &Outbox[outbox_idx], pduFields[i].length, &__dest_length);
+		outbox_idx += __dest_length;
+
 		crc_code = CRC_Calculate16(crc_code, pduFields[i].data, pduFields[i].length);
 	}
 
 	// Encode and enqueue crc code.
-    encodeAndEnqueue(&TransmitBuffer, &((uint8_t *)&crc_code)[1], sizeof(uint8_t));
-    encodeAndEnqueue(&TransmitBuffer, &((uint8_t *)&crc_code)[0], sizeof(uint8_t));
+	encodeToBuffer(&((uint8_t *)&crc_code)[1], &Outbox[outbox_idx], sizeof(uint8_t), &__dest_length);
+	outbox_idx += __dest_length;
 
-	Queue_Enqueue(&TransmitBuffer, TERMINATE_CHARACTER);
+	encodeToBuffer(&((uint8_t *)&crc_code)[0], &Outbox[outbox_idx], sizeof(uint8_t), &__dest_length);
+	outbox_idx += __dest_length;
+
+	Outbox[outbox_idx++] = TERMINATE_CHARACTER;
+
+	OutboxDataLength = outbox_idx;
+	OutboxIdx = 0;
 }
 
 uint16_t PacketManager_ParseField(uint8_t *data, uint16_t length, uint16_t unparsedPduSize)
 {
 	uint16_t parse_length = (unparsedPduSize < length) ? unparsedPduSize : length;
 
-	memoryCopy(&Temp[TempStartIndex], data, parse_length);
-
-	TempStartIndex += parse_length;
-
+	for (uint16_t i = 0; i < parse_length; i++)
+	{
+		data[i] = Inbox[InboxParseIdx++];
+	}
+	
 	return (unparsedPduSize - parse_length);
 }
 
@@ -249,105 +169,162 @@ void PacketManager_ErrorHandler(void)
 }
 
 /* Private functions ---------------------------------------------------------*/
-static void serialEventHandler(Serial_Event_t event)
+static void serialEventHandler(Serial_Event_t event, uint8_t *data, uint16_t length)
 {
 	switch (event)
 	{
+	case SERIAL_EVENT_TX_IDLE:
+	{
+		uint16_t awaiting_element_count = OutboxDataLength - OutboxIdx;
+
+		if (awaiting_element_count)
+		{
+			uint16_t bytes_to_write = (length < awaiting_element_count) ? length : awaiting_element_count;
+			bytes_to_write =
+				(PACKET_MANAGER_MAX_PACKET_SIZE < bytes_to_write) ? PACKET_MANAGER_MAX_PACKET_SIZE : bytes_to_write;
+
+			Serial_Send(&Outbox[OutboxIdx], bytes_to_write);
+			OutboxIdx += bytes_to_write;
+		}
+	}
+	break;
+
 	case SERIAL_EVENT_DATA_READY:
 	{
-		DataReceivedFlag = TRUE;
+		for (uint8_t i = 0; i < length; i++)
+		{
+			switch (data[i])
+			{
+			case START_CHARACTER:
+			{
+				InboxDataLength = 0;
+				InboxIdx = 0;
+				EscapeMode = FALSE;
+				PacketStartedFlag = TRUE;
+			}
+			break;
+
+			case TERMINATE_CHARACTER:
+			{
+				if (PacketStartedFlag)
+				{
+					// Validate pdu.
+					if (!CRC_Calculate16(0xFFFF, Inbox, InboxIdx))
+					{
+						InboxParseIdx = 0;
+
+						// Call event occurred delegate.
+						EventOccurredDelegate ? EventOccurredDelegate(PACKET_MANAGER_PDU_RECEIVED_EVENT,
+																		  InboxIdx - sizeof(uint16_t))
+												  : (void)0;
+					}
+
+					PacketStartedFlag = FALSE;
+				}
+			}
+			break;
+
+			case ESCAPE_CHARACTER:
+			{
+				EscapeMode = TRUE;
+			}
+			break;
+
+			default:
+			{
+				if (PacketStartedFlag)
+				{
+					// Discard this packet since it exceeded the packet size.
+					if (InboxDataLength == PACKET_MANAGER_MAX_PACKET_SIZE)
+					{
+						PacketStartedFlag = FALSE;
+					}
+
+					if (EscapeMode)
+					{
+						Inbox[InboxIdx++] = decode(data[i]);
+						EscapeMode = FALSE;
+					}
+					else
+					{
+						Inbox[InboxIdx++] = data[i];
+					}
+				}
+			}
+			break;
+			}
+		}
 	}
 	break;
 
 	case SERIAL_EVENT_ERROR_OCCURRED:
 	{
-		ErrorOccurredFlag = TRUE;
+		State = PACKET_MANAGER_STATE_ERROR;
+		Serial_Stop();
+
+		EventOccurredDelegate ? EventOccurredDelegate(PACKET_MANAGER_ERROR_OCCURRED_EVENT,
+													  0)
+							  : (void)0;
 	}
 	break;
 	}
 }
 
-static void dequeueAndDecode(Queue_Buffer_t *buff, uint8_t *data, uint16_t *dataLength, uint16_t rawLength)
+static uint8_t decode(uint8_t element)
 {
-	uint8_t element;
-	Bool_t escape_mode = FALSE;
+	uint8_t __element;
 
-	(*dataLength) = 0;
-
-	for (uint16_t i = 0; i < rawLength; i++)
+	// Decode character.
+	switch (element)
 	{
-		element = Queue_Dequeue(buff);
+	case ESCAPE_CHARACTER_CODE:
+		__element = ESCAPE_CHARACTER;
+		break;
 
-		if (escape_mode)
-		{
-			// Decode character.
-			switch (element)
-			{
-			case ESCAPE_CHARACTER_CODE:
-				element = ESCAPE_CHARACTER;
-				break;
+	case START_CHARACTER_CODE:
+		__element = START_CHARACTER;
+		break;
 
-			case START_CHARACTER_CODE:
-				element = START_CHARACTER;
-				break;
-
-			default:
-			case TERMINATE_CHARACTER_CODE:
-				element = TERMINATE_CHARACTER;
-				break;
-			}
-
-			escape_mode = FALSE;
-		}
-		else if (element == ESCAPE_CHARACTER)
-		{
-			escape_mode = TRUE;
-			continue;
-		}
-
-        data[(*dataLength)++] = element;
+	default:
+	case TERMINATE_CHARACTER_CODE:
+		__element = TERMINATE_CHARACTER;
+		break;
 	}
+
+	return __element;
 }
 
-static void encodeAndEnqueue(Queue_Buffer_t *buff, uint8_t *data, uint16_t dataLength)
+static void encodeToBuffer(uint8_t *src, uint8_t *dest, uint16_t srcLength, uint16_t *destLength)
 {
 	uint8_t element;
+	uint16_t __dest_length = 0;
 
-    for (uint16_t i = 0; i < dataLength; i++)
+	for (uint16_t i = 0; i < srcLength; i++)
 	{
-		element = data[i];
+		element = src[i];
 
 		switch (element)
 		{
 		case START_CHARACTER:
-			Queue_Enqueue(buff, ESCAPE_CHARACTER);
-			Queue_Enqueue(buff, START_CHARACTER_CODE);
+			dest[__dest_length++] = ESCAPE_CHARACTER;
+			dest[__dest_length++] = START_CHARACTER_CODE;
 			break;
 
 		case TERMINATE_CHARACTER:
-			Queue_Enqueue(buff, ESCAPE_CHARACTER);
-			Queue_Enqueue(buff, TERMINATE_CHARACTER_CODE);
+			dest[__dest_length++] = ESCAPE_CHARACTER;
+			dest[__dest_length++] = TERMINATE_CHARACTER_CODE;
 			break;
 
 		case ESCAPE_CHARACTER:
-            Queue_Enqueue(buff, ESCAPE_CHARACTER);
-			Queue_Enqueue(buff, ESCAPE_CHARACTER_CODE);
+			dest[__dest_length++] = ESCAPE_CHARACTER;
+			dest[__dest_length++] = ESCAPE_CHARACTER_CODE;
 			break;
 
 		default:
-			Queue_Enqueue(buff, element);
+			dest[__dest_length++] = element;
 			break;
 		}
 	}
-}
 
-void memoryCopy(uint8_t *source, uint8_t *destination, uint32_t length)
-{
-	if (source && destination)
-	{
-		for (uint32_t i = 0; i < length; i++)
-		{
-			destination[i] = source[i];
-		}
-	}
+	*destLength = __dest_length;
 }

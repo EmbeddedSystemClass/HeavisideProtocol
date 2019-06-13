@@ -21,11 +21,13 @@ extern "C"
 	enum
 	{
 		SERIAL_EVENT_DATA_READY = 0,
+		SERIAL_EVENT_TX_IDLE,
 		SERIAL_EVENT_ERROR_OCCURRED
 	};
 	typedef uint8_t Serial_Event_t;
 
-	typedef void (*Serial_EventOccurredDelegate_t)(Serial_Event_t event);
+	typedef void (*Serial_EventOccurredDelegate_t)(Serial_Event_t event, uint8_t *data,
+												   uint16_t length);
 
 	/* Exported functions ------------------------------------------------------*/
 	extern void Serial_Setup(Serial_EventOccurredDelegate_t eventHandler);
@@ -33,7 +35,6 @@ extern "C"
 	extern void Serial_Execute(void);
 	extern void Serial_Stop(void);
 	extern uint16_t Serial_GetAvailableSpace(void);
-	extern void Serial_ReadBuffer(uint8_t *data, uint16_t maxLength, uint16_t *length);
 	extern void Serial_Send(uint8_t *data, uint16_t dataLength);
 
 #ifdef __cplusplus

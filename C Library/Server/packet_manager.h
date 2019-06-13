@@ -7,15 +7,13 @@
 
 /* Include files -------------------------------------------------------------*/
 #include "generic.h"
-#include "queue.h"
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 	/* Exported definitions -----------------------------------------------------*/
-#define PACKET_MANAGER_RECEIVE_QUEUE_CAPACITY QUEUE_CAPACITY_128
-#define PACKET_MANAGER_TRANSMIT_QUEUE_CAPACITY QUEUE_CAPACITY_128
+#define PACKET_MANAGER_MAX_PACKET_SIZE 64
 
 	/* Exported types ------------------------------------------------------------*/
 	enum

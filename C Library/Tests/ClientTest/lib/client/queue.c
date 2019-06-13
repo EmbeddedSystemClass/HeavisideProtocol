@@ -85,6 +85,22 @@ uint8_t Queue_Peek(Queue_Buffer_t *buff, uint16_t elementIndex)
 	return (buff->pContainer[element_position]);
 }
 
+void Queue_Set(Queue_Buffer_t *buff, uint16_t elementIndex, uint8_t value)
+{
+	uint16_t element_position = buff->head + elementIndex;
+	element_position &= buff->mask;
+
+	buff->pContainer[element_position] = value;
+}
+
+uint16_t Queue_GetCurrentIdx(Queue_Buffer_t *buff)
+{
+	uint16_t element_position = buff->tail - buff->head;
+	element_position &= buff->mask;
+
+	return element_position;
+}
+
 uint16_t Queue_GetAvailableSpace(Queue_Buffer_t *buff)
 {
 	uint16_t elements = (buff->tail - buff->head) & buff->mask;
