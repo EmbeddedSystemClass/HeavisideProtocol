@@ -5,6 +5,10 @@
 #define SERVER_ADDRESS 0x01
 #define TEST_COUNT 10
 
+// #define __BASIC_READ_WRITE_TEST 1
+#define __POLAR_BEAR_TEST 1
+
+#ifdef __BASIC_READ_WRITE_TEST
 static uint8_t char_read_u8;
 static uint16_t char_read_u16;
 static uint32_t char_read_u32;
@@ -23,6 +27,15 @@ static uint8_t *char_read[] = {(uint8_t *)&char_read_u8, (uint8_t *)&char_read_u
 static uint8_t char_ids[] = {0, 1, 2, 3};
 static uint8_t char_sizes[] = {sizeof(uint8_t), sizeof(uint16_t), sizeof(uint32_t),
                                sizeof(float)};
+#endif
+
+#ifdef __POLAR_BEAR_TEST
+#define PLATE_TEMPERATURE_OBJ_ID 4
+#define TEMPERATURE_READ_PERIOD 500
+
+static float PlateTemperature;
+static uint32_t LastTemperatureReadTime;
+#endif
 
 static void idleEventHandler(void);
 static void readResponseReceived(uint8_t sourceAddr, uint8_t charId);
@@ -48,6 +61,8 @@ void setup()
   Serial.begin(9600);
 
   ObjshareClient_Start();
+
+  LastTemperatureReadTime = 0;
 }
 
 void loop()
@@ -56,7 +71,8 @@ void loop()
 
   ObjshareClient_Execute();
 
-  // Enqueue write requests.
+// Enqueue write requests.
+#ifdef __BASIC_READ_WRITE_TEST
   if (isIdle)
   {
     if (test_cnt < TEST_COUNT)
@@ -74,31 +90,46 @@ void loop()
       for (uint8_t i = 0; i < sizeof(char_ids) / sizeof(char_ids[0]); i++)
       {
         ObjshareClient_SendWriteRequest(SERVER_ADDRESS,
-                                              i, char_write[i], char_sizes[i]);
+                                        i, char_write[i], char_sizes[i]);
       }
 
       // Enqueue read requests for written chars.
       for (uint8_t i = 0; i < sizeof(char_ids) / sizeof(char_ids[0]); i++)
       {
         ObjshareClient_SendReadRequest(SERVER_ADDRESS,
-                                             char_ids[i], char_read[i],
-                                             char_sizes[i]);
+                                       char_ids[i], char_read[i],
+                                       char_sizes[i]);
       }
 
       isIdle = false;
       test_cnt++;
     }
   }
+#endif
+
+#ifdef __POLAR_BEAR_TEST
+  uint32_t __time;
+  __time = millis();
+  if (__time > LastTemperatureReadTime + TEMPERATURE_READ_PERIOD)
+  {
+    ObjshareClient_SendReadRequest(SERVER_ADDRESS, PLATE_TEMPERATURE_OBJ_ID, (uint8_t *)&PlateTemperature,
+                                   sizeof(PlateTemperature));
+    LastTemperatureReadTime = __time;
+  }
+#endif
 }
 
 void test(const char *message, bool eq)
 {
+#ifdef __BASIC_READ_WRITE_TEST
   Serial.print(message);
   Serial.println(eq ? "S" : "F");
+#endif
 }
 
 void idleEventHandler(void)
 {
+#ifdef __BASIC_READ_WRITE_TEST
   if (!isIdle)
   {
     test("u8:", char_read_u8 == char_write_u8);
@@ -108,19 +139,33 @@ void idleEventHandler(void)
 
     isIdle = true;
   }
+#endif
 }
 
 void readResponseReceived(uint8_t sourceAddr, uint8_t charId)
 {
+#ifdef __POLAR_BEAR_TEST
+  String __str;
+  __str = "Plate temperature: ";
+  __str += PlateTemperature;
+
+  Serial.println(__str);
+#endif
+#ifdef __BASIC_READ_WRITE_TEST
   Serial.println("Read response received");
+#endif
 }
 
 void operationFailed(uint8_t sourceAddr)
 {
+#ifdef __BASIC_READ_WRITE_TEST
   Serial.println("Operation failed");
+#endif
 }
 
 void noResponse(uint8_t sourceAddr)
 {
+#ifdef __BASIC_READ_WRITE_TEST
   Serial.println("No response");
+#endif
 }

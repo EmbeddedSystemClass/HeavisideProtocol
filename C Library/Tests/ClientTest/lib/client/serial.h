@@ -8,6 +8,9 @@ extern "C"
 {
 #endif
 
+/* Exported definitions ----------------------------------------------------*/
+#define SERIAL_VOID_CHARACTER 0xAA
+
 	/* Exported typedefs -------------------------------------------------------*/
 	enum
 	{
@@ -34,7 +37,6 @@ extern "C"
 	extern Bool_t Serial_Start(void);
 	extern void Serial_Execute(void);
 	extern void Serial_Stop(void);
-	extern uint16_t Serial_GetAvailableSpace(void);
 	extern void Serial_Send(uint8_t *data, uint16_t dataLength);
 
 #ifdef __cplusplus
